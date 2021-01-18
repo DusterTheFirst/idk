@@ -1,0 +1,12 @@
+[package]
+name = "sudoku"
+version = "0.1.0"
+authors = ["Zachary Kohnen <14093962+DusterTheFirst@users.noreply.github.com>"]
+edition = "2018"
+
+[dependencies]
+gtk = { version = "0.9", features = ["v3_16"] }
+cairo-rs = "0.9"
+gio = "0.9"
+derive_more = "0.99"
+thiserror = "1.0"
