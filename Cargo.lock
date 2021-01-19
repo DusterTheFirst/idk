@@ -564,6 +564,7 @@ dependencies = [
  "cairo-rs",
  "derive_more",
  "gio",
+ "glib",
  "gtk",
  "thiserror",
 ]
