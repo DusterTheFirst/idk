@@ -1,5 +1,7 @@
 use cairo::Context;
 
+use crate::sudoku::Digit;
+
 pub fn rgb(hex: u32) -> RGB {
     assert!(hex <= 0xffffff);
 
@@ -58,13 +60,12 @@ impl SetColor<RGBA> for Context {
     }
 }
 
-pub fn get_number_color(number: u8) -> RGB {
-    match number {
-        1 | 9 => rgb(0xb9e6f0),
-        2 | 8 => rgb(0x94ebae),
-        3 | 7 => rgb(0xdeb6de),
-        4 | 6 => rgb(0xfff975),
-        5 => rgb(0xf9b0b4),
-        _ => unreachable!("Only numbers 1-9 are used in sudoku"),
+pub fn get_digit_color(digit: Digit) -> RGB {
+    match digit {
+        Digit::One | Digit::Nine => rgb(0xb9e6f0),
+        Digit::Two | Digit::Eight => rgb(0x94ebae),
+        Digit::Three | Digit::Seven => rgb(0xdeb6de),
+        Digit::Four | Digit::Six => rgb(0xfff975),
+        Digit::Five => rgb(0xf9b0b4),
     }
 }

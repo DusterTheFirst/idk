@@ -1,7 +1,7 @@
 use cairo::{Context, Matrix, Rectangle};
 
 use crate::{
-    color::{get_number_color, rgb, rgba, SetColor},
+    color::{get_digit_color, rgb, rgba, SetColor},
     sudoku::{Block, Cell, Sudoku},
 };
 
@@ -76,22 +76,51 @@ impl Drawable for Cell {
         ctx.rectangle(0.0, 0.0, 1.0, 1.0);
         ctx.fill();
 
-        if let Some(digit) = self.digit {
-            ctx.set_color(get_number_color(digit));
-            ctx.rectangle(0.0, 0.0, 1.0, 1.0);
-            ctx.fill();
+        match self {
+            Cell::Digit(digit) => {
+                let digit = *digit;
 
-            ctx.set_font_size(0.8);
-            ctx.set_color(rgb(0x000000));
+                ctx.set_color(get_digit_color(digit));
+                ctx.rectangle(0.0, 0.0, 1.0, 1.0);
+                ctx.fill();
 
-            let digit = digit.to_string();
-            let text_extents = ctx.text_extents(&digit);
+                ctx.set_font_size(0.8);
+                ctx.set_color(rgb(0x000000));
 
-            let x_pos = 0.5 - text_extents.width / 2.0 - text_extents.x_bearing;
-            let y_pos = 0.5 - text_extents.height / 2.0 - text_extents.y_bearing;
+                let digit = u8::from(digit).to_string();
+                let text_extents = ctx.text_extents(&digit);
 
-            ctx.move_to(x_pos, y_pos);
-            ctx.show_text(&digit);
+                let x_pos = 0.5 - text_extents.width / 2.0 - text_extents.x_bearing;
+                let y_pos = 0.5 - text_extents.height / 2.0 - text_extents.y_bearing;
+
+                ctx.move_to(x_pos, y_pos);
+                ctx.show_text(&digit);
+            }
+            Cell::Pencil(pencil) => {
+                assert!(
+                    pencil.len() < 9,
+                    "Too many pencil marks, something went super wrong"
+                );
+
+                ctx.set_font_size(0.3);
+                ctx.set_color(rgb(0x808080));
+
+                for (i, pencil_mark) in pencil.iter().copied().enumerate() {
+                    let y_offset = (i / 3) as f64 * (1.0 / 3.0);
+                    let x_offset = (i % 3) as f64 * (1.0 / 3.0);
+
+                    let digit = u8::from(pencil_mark).to_string();
+                    let text_extents = ctx.text_extents(&digit);
+
+                    let x_pos =
+                        x_offset + (1.0 / 6.0) - text_extents.width / 2.0 - text_extents.x_bearing;
+                    let y_pos =
+                        y_offset + (1.0 / 6.0) - text_extents.height / 2.0 - text_extents.y_bearing;
+
+                    ctx.move_to(x_pos, y_pos);
+                    ctx.show_text(&digit);
+                }
+            }
         }
     }
 }
