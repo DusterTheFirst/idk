@@ -65,12 +65,9 @@ fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
                     let cell: &mut Cell = &mut block[cell];
 
                     if let Cell::Pencil(set) = cell {
-                        set.insert(Digit::One);
-                        set.insert(Digit::Five);
-                        set.insert(Digit::Six);
-                        set.insert(Digit::Three);
-                        set.insert(Digit::Two);
-                        set.insert(Digit::Nine);
+                        for digit in Digit::iterator() {
+                            set.insert(digit);
+                        }
                     }
                 }
             }
@@ -103,6 +100,9 @@ fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
 }
 
 fn main() {
+    Sudoku::new();
+    return;
+
     let application = gtk::Application::new(Some("com.dusterthefirst.sudoku"), Default::default())
         .expect("Initialization failed...");
 

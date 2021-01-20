@@ -77,7 +77,7 @@ impl Drawable for Cell {
         ctx.fill();
 
         match self {
-            Cell::Digit(digit) => {
+            Cell::Given(digit) => {
                 let digit = *digit;
 
                 ctx.set_color(get_digit_color(digit));
@@ -96,9 +96,24 @@ impl Drawable for Cell {
                 ctx.move_to(x_pos, y_pos);
                 ctx.show_text(&digit);
             }
+            Cell::Digit(digit) => {
+                let digit = *digit;
+
+                ctx.set_font_size(0.8);
+                ctx.set_color(rgb(0x000000));
+
+                let digit = u8::from(digit).to_string();
+                let text_extents = ctx.text_extents(&digit);
+
+                let x_pos = 0.5 - text_extents.width / 2.0 - text_extents.x_bearing;
+                let y_pos = 0.5 - text_extents.height / 2.0 - text_extents.y_bearing;
+
+                ctx.move_to(x_pos, y_pos);
+                ctx.show_text(&digit);
+            }
             Cell::Pencil(pencil) => {
                 assert!(
-                    pencil.len() < 9,
+                    pencil.len() <= 9,
                     "Too many pencil marks, something went super wrong"
                 );
 
