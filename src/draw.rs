@@ -1,8 +1,10 @@
+use std::collections::HashSet;
+
 use cairo::{Context, Matrix, Rectangle};
 
 use crate::{
     color::{get_digit_color, rgb, rgba, SetColor},
-    sudoku::{Block, Cell, Sudoku},
+    sudoku::{Cell, Relation, SolveStatus, Sudoku},
 };
 
 pub trait Drawable {
@@ -32,15 +34,15 @@ impl Drawable for Sudoku {
     fn draw_impl(&self, ctx: &Context) {
         let border_width = 0.02;
 
-        for (i, block) in self.iter().enumerate() {
-            let x = (i % 3) as f64;
-            let y = (i / 3) as f64;
+        for i in 0..9 {
+            let x = i % 3;
+            let y = i / 3;
 
-            block.draw(
+            Block { sudoku: self, x, y }.draw(
                 ctx,
                 Rectangle {
-                    x: x / 3.0 + (border_width * x) / 2.0,
-                    y: y / 3.0 + (border_width * y) / 2.0,
+                    x: x as f64 / 3.0 + (border_width * x as f64) / 2.0,
+                    y: y as f64 / 3.0 + (border_width * y as f64) / 2.0,
                     width: 1.0 / 3.0 - (border_width * 2.0) / 2.0,
                     height: 1.0 / 3.0 - (border_width * 2.0) / 2.0,
                 },
@@ -49,23 +51,42 @@ impl Drawable for Sudoku {
     }
 }
 
-impl Drawable for Block {
+struct Block<'s> {
+    sudoku: &'s Sudoku,
+    x: usize,
+    y: usize,
+}
+impl<'s> Drawable for Block<'s> {
     fn draw_impl(&self, ctx: &Context) {
         let border_width = 0.01;
 
-        for (i, cell) in self.iter().enumerate() {
-            let x = (i % 3) as f64;
-            let y = (i / 3) as f64;
+        for i in 0..9 {
+            let x = i % 3;
+            let y = i / 3;
 
-            cell.draw(
+            self.sudoku[(x + self.x * 3, y + self.y * 3)].draw(
                 ctx,
                 Rectangle {
-                    x: x / 3.0 + (border_width * x) / 2.0,
-                    y: y / 3.0 + (border_width * y) / 2.0,
+                    x: x as f64 / 3.0 + (border_width * x as f64) / 2.0,
+                    y: y as f64 / 3.0 + (border_width * y as f64) / 2.0,
                     width: 1.0 / 3.0 - (border_width * 2.0) / 2.0,
                     height: 1.0 / 3.0 - (border_width * 2.0) / 2.0,
                 },
             );
+        }
+
+        match self.sudoku.block_status((self.x, self.y)) {
+            SolveStatus::Unsolved => {}
+            SolveStatus::Solved => {
+                ctx.set_color(rgba(0x00ff0050));
+                ctx.rectangle(0.0, 0.0, 1.0, 1.0);
+                ctx.fill();
+            }
+            SolveStatus::Invalid => {
+                ctx.set_color(rgba(0xff000050));
+                ctx.rectangle(0.0, 0.0, 1.0, 1.0);
+                ctx.fill();
+            }
         }
     }
 }

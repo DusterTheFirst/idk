@@ -5,7 +5,7 @@ use draw::Drawable;
 use gio::prelude::*;
 use glib::clone;
 use gtk::{prelude::*, Align, AspectFrame, Box, Button, ButtonBox, DrawingArea, Orientation};
-use sudoku::{Block, Cell, Digit, Sudoku};
+use sudoku::{Cell, Digit, Relation, Sudoku};
 
 mod color;
 mod draw;
@@ -58,16 +58,33 @@ fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
         clone!(@strong sudoku, @strong drawing_area => move |_, _| {
             let mut sudoku = sudoku.write().unwrap();
 
-            for block in 0..sudoku.len() {
-                let block: &mut Block = &mut sudoku[block];
 
-                for cell in 0..block.len() {
-                    let cell: &mut Cell = &mut block[cell];
-
-                    if let Cell::Pencil(set) = cell {
+            // Add all pencils
+            for x in 0..9 {
+                for y in 0..9 {
+                    if let Cell::Pencil(set) = &mut sudoku[(x, y)] {
                         for digit in Digit::iterator() {
                             set.insert(digit);
                         }
+                    }
+                }
+            }
+
+            drawing_area.queue_draw();
+
+            // Filter pencils
+            for x in 0..9 {
+                for y in 0..9 {
+                    if let Cell::Pencil(set) = &sudoku[(x, y)] {
+                        let mut set = set.clone();
+
+                        for neighbor in sudoku.all_neighbors((x, y)) {
+                            if let Cell::Given(digit) = neighbor {
+                                set.remove(&digit);
+                            }
+                        }
+
+                        sudoku[(x, y)] = Cell::Pencil(set);
                     }
                 }
             }
@@ -100,13 +117,10 @@ fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
 }
 
 fn main() {
-    Sudoku::new();
-    return;
-
     let application = gtk::Application::new(Some("com.dusterthefirst.sudoku"), Default::default())
         .expect("Initialization failed...");
 
-    let sudoku = fs::read_to_string("sudoku.txt").unwrap();
+    let sudoku = fs::read_to_string(args().nth(1).unwrap_or_else(|| "sudoku.txt".into())).unwrap();
     let sudoku = Rc::new(RwLock::new(
         sudoku.parse().unwrap_or_else(|e| panic!("{}", e)),
     ));
@@ -115,5 +129,5 @@ fn main() {
         build_ui(app, Rc::clone(&sudoku));
     });
 
-    application.run(&args().collect::<Vec<_>>());
+    application.run(&[]);
 }

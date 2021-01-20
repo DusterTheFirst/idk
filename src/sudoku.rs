@@ -1,85 +1,121 @@
 use std::{
     collections::{BTreeSet, HashSet},
     convert::{TryFrom, TryInto},
+    ops::{Index, IndexMut},
     str::FromStr,
 };
 
 use derive_more::{AsRef, Deref, DerefMut};
-use petgraph::{
-    dot::{Config, Dot},
-    graph::UnGraph,
-    Graph,
-};
+use petgraph::{graph::NodeIndex, visit::EdgeRef, Graph, Undirected};
 use thiserror::Error;
 
-#[derive(Default, Debug, Deref, DerefMut, AsRef, Clone)]
-pub struct Sudoku([Block; 9]);
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Relation {
+    Block,
+    Row,
+    Column,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum SolveStatus {
+    Unsolved,
+    Solved,
+    Invalid,
+}
+
+#[derive(Debug, Deref, DerefMut, AsRef)]
+pub struct Sudoku(Graph<Cell, Relation, Undirected>);
 
 impl Sudoku {
-    pub fn new() {
+    pub fn new() -> Self {
         let mut graph = Graph::new_undirected();
-        let mut all_cells = Vec::new();
+        let mut all_cells = Vec::with_capacity(9 * 9);
 
-        for block in 0..9 {
-            let x = block % 3 * 3;
-            let y = block / 3 * 3;
-
-            let mut cells = (0..9)
-                .map(|cell| {
-                    (
-                        (x + cell % 3, y + cell / 3),
-                        block,
-                        graph.add_node(Cell::Pencil(BTreeSet::new())),
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            // for (_, _, cell) in cells.iter() {
-            //     for (_, _, other_cell) in cells.iter().filter(|(_, _, idx)| idx != cell) {
-            //         graph.add_edge(*cell, *other_cell, ());
-            //     }
-            // }
-
-            all_cells.append(&mut cells);
+        for x in 0..9 {
+            for y in 0..9 {
+                all_cells.push((
+                    (x, y),
+                    x / 3 + y * 3,
+                    graph.add_node(Cell::Pencil(BTreeSet::new())),
+                ))
+            }
         }
 
         for ((x, y), block, cell) in all_cells.iter() {
-            for ((other_x, other_y), other_block, other_cell) in all_cells.iter().filter(|(_, _, idx)| idx != cell) {
-                if other_x == x || other_y == y || other_block == block {
-                    graph.add_edge(*cell, *other_cell, ());
+            for ((other_x, other_y), other_block, other_cell) in
+                all_cells.iter().filter(|(_, _, idx)| idx != cell)
+            {
+                if other_block == block {
+                    graph.update_edge(*cell, *other_cell, Relation::Block);
+                } else if other_x == x {
+                    graph.update_edge(*cell, *other_cell, Relation::Column);
+                } else if other_y == y {
+                    graph.update_edge(*cell, *other_cell, Relation::Row);
                 }
             }
         }
 
-        // for ((x, y), block, cell) in all_cells.iter() {
-        //     for row_cell in all_cells
-        //         .iter()
-        //         .filter(|((other_x, _), other_block, id)| {
-        //             other_x == x && id != cell && other_block != block
-        //         })
-        //         .map(|(_, _, idx)| idx)
-        //     {
-        //         graph.add_edge(*cell, *row_cell, ());
-        //     }
-
-        //     for col_cell in all_cells
-        //         .iter()
-        //         .filter(|((_, other_y), other_block, id)| {
-        //             other_y == y && id != cell && other_block != block
-        //         })
-        //         .map(|(_, _, idx)| idx)
-        //     {
-        //         graph.add_edge(*cell, *col_cell, ());
-        //     }
-        // }
-
-        eprintln!("done");
-        println!("{:?}", Dot::with_config(&graph, &[Config::EdgeNoLabel]));
+        Sudoku(graph)
     }
 
     pub fn solved(&self) -> bool {
         // TODO: Check rows and columns
-        self.iter().all(|x| x.valid())
+        // self.iter().all(|x| x.valid())
+        false
+    }
+
+    pub fn block_status(&self, (block_x, block_y): (usize, usize)) -> SolveStatus {
+        let mut digits = HashSet::new();
+
+        for cell in self.neighbors((block_x * 3, block_y * 3), Relation::Block) {
+            match cell {
+                Cell::Digit(digit) | Cell::Given(digit) => {
+                    if !digits.insert(digit) {
+                        return SolveStatus::Invalid;
+                    }
+                }
+                Cell::Pencil(_) => {
+                    return SolveStatus::Unsolved;
+                }
+            }
+        }
+
+        SolveStatus::Solved
+    }
+
+    pub fn neighbors(
+        &self,
+        (x, y): (usize, usize),
+        relation: Relation,
+    ) -> impl Iterator<Item = &Cell> {
+        self.0
+            .edges(Self::index_of((x, y)))
+            .filter(move |x| x.weight() == &relation)
+            .map(move |x| &self.0[x.target()])
+    }
+
+    pub fn all_neighbors(&self, (x, y): (usize, usize)) -> impl Iterator<Item = &Cell> {
+        self.0
+            .edges(Self::index_of((x, y)))
+            .map(move |x| &self.0[x.target()])
+    }
+
+    fn index_of((x, y): (usize, usize)) -> NodeIndex {
+        NodeIndex::new(x * 9 + y)
+    }
+}
+
+impl Index<(usize, usize)> for Sudoku {
+    type Output = Cell;
+
+    fn index(&self, pos: (usize, usize)) -> &Self::Output {
+        &self.0[Self::index_of(pos)]
+    }
+}
+
+impl IndexMut<(usize, usize)> for Sudoku {
+    fn index_mut(&mut self, pos: (usize, usize)) -> &mut Self::Output {
+        &mut self.0[Self::index_of(pos)]
     }
 }
 
@@ -101,7 +137,7 @@ impl FromStr for Sudoku {
             return Err(SudokuParseError::TooShort(s.len()));
         }
 
-        let mut sudoku = Sudoku::default();
+        let mut sudoku = Sudoku::new();
 
         for block in 0..9 {
             for cell in 0..9 {
@@ -111,7 +147,7 @@ impl FromStr for Sudoku {
                 let char = s.chars().nth(x + y * 9).unwrap();
 
                 if char != '-' {
-                    sudoku[block][cell] = Cell::Given(
+                    sudoku[(x, y)] = Cell::Given(
                         (char
                             .to_digit(10)
                             .ok_or(SudokuParseError::InvalidChar(char))?
@@ -124,19 +160,6 @@ impl FromStr for Sudoku {
         }
 
         Ok(sudoku)
-    }
-}
-
-#[derive(Default, Debug, Deref, DerefMut, AsRef, Clone)]
-pub struct Block([Cell; 9]);
-
-impl Block {
-    pub fn valid(&self) -> bool {
-        let mut unique = HashSet::new();
-        self.iter().all(move |x| match x {
-            Cell::Digit(digit) | Cell::Given(digit) => unique.insert(digit),
-            _ => true,
-        })
     }
 }
 
