@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashSet},
     convert::{TryFrom, TryInto},
+    fmt::Debug,
     ops::{Index, IndexMut},
     str::FromStr,
 };
@@ -23,8 +24,8 @@ pub enum SolveStatus {
     Invalid,
 }
 
-#[derive(Debug, Deref, DerefMut, AsRef)]
-pub struct Sudoku(Graph<Cell, Relation, Undirected>);
+#[derive(Debug)]
+pub struct Sudoku(Graph<CellContents, Relation, Undirected>);
 
 impl Sudoku {
     pub fn new() -> Self {
@@ -35,8 +36,8 @@ impl Sudoku {
             for y in 0..9 {
                 all_cells.push((
                     (x, y),
-                    x / 3 + y * 3,
-                    graph.add_node(Cell::Pencil(BTreeSet::new())),
+                    x / 3 + (y / 3) * 3,
+                    graph.add_node(CellContents::Pencil(BTreeSet::new())),
                 ))
             }
         }
@@ -69,12 +70,12 @@ impl Sudoku {
 
         for cell in self.neighbors((block_x * 3, block_y * 3), Relation::Block) {
             match cell {
-                Cell::Digit(digit) | Cell::Given(digit) => {
+                CellContents::Digit(digit) | CellContents::Given(digit) => {
                     if !digits.insert(digit) {
                         return SolveStatus::Invalid;
                     }
                 }
-                Cell::Pencil(_) => {
+                CellContents::Pencil(_) => {
                     return SolveStatus::Unsolved;
                 }
             }
@@ -83,18 +84,47 @@ impl Sudoku {
         SolveStatus::Solved
     }
 
+    pub fn cell_status(&self, (x, y): (usize, usize)) -> SolveStatus {
+        let cell_digit = match &self[(x, y)] {
+            CellContents::Digit(digit) | CellContents::Given(digit) => digit,
+            CellContents::Pencil(_) => {
+                return SolveStatus::Unsolved;
+            }
+        };
+
+        let mut has_pencil = false;
+        for cell in self.all_neighbors((x, y)) {
+            match cell {
+                CellContents::Digit(digit) | CellContents::Given(digit) => {
+                    if cell_digit == digit {
+                        return SolveStatus::Invalid;
+                    }
+                }
+                CellContents::Pencil(_) => {
+                    has_pencil = true;
+                }
+            }
+        }
+
+        if has_pencil {
+            SolveStatus::Unsolved
+        } else {
+            SolveStatus::Solved
+        }
+    }
+
     pub fn neighbors(
         &self,
         (x, y): (usize, usize),
         relation: Relation,
-    ) -> impl Iterator<Item = &Cell> {
+    ) -> impl Iterator<Item = &CellContents> {
         self.0
             .edges(Self::index_of((x, y)))
             .filter(move |x| x.weight() == &relation)
             .map(move |x| &self.0[x.target()])
     }
 
-    pub fn all_neighbors(&self, (x, y): (usize, usize)) -> impl Iterator<Item = &Cell> {
+    pub fn all_neighbors(&self, (x, y): (usize, usize)) -> impl Iterator<Item = &CellContents> {
         self.0
             .edges(Self::index_of((x, y)))
             .map(move |x| &self.0[x.target()])
@@ -106,7 +136,7 @@ impl Sudoku {
 }
 
 impl Index<(usize, usize)> for Sudoku {
-    type Output = Cell;
+    type Output = CellContents;
 
     fn index(&self, pos: (usize, usize)) -> &Self::Output {
         &self.0[Self::index_of(pos)]
@@ -147,7 +177,7 @@ impl FromStr for Sudoku {
                 let char = s.chars().nth(x + y * 9).unwrap();
 
                 if char != '-' {
-                    sudoku[(x, y)] = Cell::Given(
+                    sudoku[(x, y)] = CellContents::Given(
                         (char
                             .to_digit(10)
                             .ok_or(SudokuParseError::InvalidChar(char))?
@@ -159,21 +189,17 @@ impl FromStr for Sudoku {
             }
         }
 
+        // TODO: VALIDATE
+
         Ok(sudoku)
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum Cell {
+pub enum CellContents {
     Digit(Digit),
     Given(Digit),
     Pencil(BTreeSet<Digit>),
-}
-
-impl Default for Cell {
-    fn default() -> Self {
-        Self::Pencil(BTreeSet::new())
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

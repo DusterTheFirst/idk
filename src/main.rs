@@ -5,7 +5,7 @@ use draw::Drawable;
 use gio::prelude::*;
 use glib::clone;
 use gtk::{prelude::*, Align, AspectFrame, Box, Button, ButtonBox, DrawingArea, Orientation};
-use sudoku::{Cell, Digit, Relation, Sudoku};
+use sudoku::{CellContents, Digit, Relation, Sudoku};
 
 mod color;
 mod draw;
@@ -62,7 +62,7 @@ fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
             // Add all pencils
             for x in 0..9 {
                 for y in 0..9 {
-                    if let Cell::Pencil(set) = &mut sudoku[(x, y)] {
+                    if let CellContents::Pencil(set) = &mut sudoku[(x, y)] {
                         for digit in Digit::iterator() {
                             set.insert(digit);
                         }
@@ -75,16 +75,16 @@ fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
             // Filter pencils
             for x in 0..9 {
                 for y in 0..9 {
-                    if let Cell::Pencil(set) = &sudoku[(x, y)] {
+                    if let CellContents::Pencil(set) = &sudoku[(x, y)] {
                         let mut set = set.clone();
 
                         for neighbor in sudoku.all_neighbors((x, y)) {
-                            if let Cell::Given(digit) = neighbor {
+                            if let CellContents::Given(digit) = neighbor {
                                 set.remove(&digit);
                             }
                         }
 
-                        sudoku[(x, y)] = Cell::Pencil(set);
+                        sudoku[(x, y)] = CellContents::Pencil(set);
                     }
                 }
             }

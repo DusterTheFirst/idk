@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-
 use cairo::{Context, Matrix, Rectangle};
 
 use crate::{
     color::{get_digit_color, rgb, rgba, SetColor},
-    sudoku::{Cell, Relation, SolveStatus, Sudoku},
+    sudoku::{CellContents, Sudoku},
 };
 
 pub trait Drawable {
@@ -64,7 +62,16 @@ impl<'s> Drawable for Block<'s> {
             let x = i % 3;
             let y = i / 3;
 
-            self.sudoku[(x + self.x * 3, y + self.y * 3)].draw(
+            let global_x = x + self.x * 3;
+            let global_y = y + self.y * 3;
+
+            Cell {
+                contents: &self.sudoku[(global_x, global_y)],
+                sudoku: self.sudoku,
+                x: global_x,
+                y: global_y,
+            }
+            .draw(
                 ctx,
                 Rectangle {
                     x: x as f64 / 3.0 + (border_width * x as f64) / 2.0,
@@ -75,30 +82,37 @@ impl<'s> Drawable for Block<'s> {
             );
         }
 
-        match self.sudoku.block_status((self.x, self.y)) {
-            SolveStatus::Unsolved => {}
-            SolveStatus::Solved => {
-                ctx.set_color(rgba(0x00ff0050));
-                ctx.rectangle(0.0, 0.0, 1.0, 1.0);
-                ctx.fill();
-            }
-            SolveStatus::Invalid => {
-                ctx.set_color(rgba(0xff000050));
-                ctx.rectangle(0.0, 0.0, 1.0, 1.0);
-                ctx.fill();
-            }
-        }
+        // match self.sudoku.block_status((self.x, self.y)) {
+        //     SolveStatus::Unsolved => {}
+        //     SolveStatus::Solved => {
+        //         ctx.set_color(rgba(0x00ff0050));
+        //         ctx.rectangle(0.0, 0.0, 1.0, 1.0);
+        //         ctx.fill();
+        //     }
+        //     SolveStatus::Invalid => {
+        //         ctx.set_color(rgba(0xff000050));
+        //         ctx.rectangle(0.0, 0.0, 1.0, 1.0);
+        //         ctx.fill();
+        //     }
+        // }
     }
 }
 
-impl Drawable for Cell {
+#[derive(Debug, Clone)]
+struct Cell<'s> {
+    sudoku: &'s Sudoku,
+    contents: &'s CellContents,
+    x: usize,
+    y: usize,
+}
+impl Drawable for Cell<'_> {
     fn draw_impl(&self, ctx: &Context) {
         ctx.set_color(rgba(0x80808080));
         ctx.rectangle(0.0, 0.0, 1.0, 1.0);
         ctx.fill();
 
-        match self {
-            Cell::Given(digit) => {
+        match self.contents {
+            CellContents::Given(digit) => {
                 let digit = *digit;
 
                 ctx.set_color(get_digit_color(digit));
@@ -106,7 +120,11 @@ impl Drawable for Cell {
                 ctx.fill();
 
                 ctx.set_font_size(0.8);
-                ctx.set_color(rgb(0x000000));
+                ctx.set_color(rgb(match self.sudoku.cell_status((self.x, self.y)) {
+                    crate::sudoku::SolveStatus::Unsolved => 0x000000,
+                    crate::sudoku::SolveStatus::Solved => 0x00ff00,
+                    crate::sudoku::SolveStatus::Invalid => 0xff0000,
+                }));
 
                 let digit = u8::from(digit).to_string();
                 let text_extents = ctx.text_extents(&digit);
@@ -117,11 +135,16 @@ impl Drawable for Cell {
                 ctx.move_to(x_pos, y_pos);
                 ctx.show_text(&digit);
             }
-            Cell::Digit(digit) => {
+            CellContents::Digit(digit) => {
                 let digit = *digit;
 
                 ctx.set_font_size(0.8);
-                ctx.set_color(rgb(0x000000));
+
+                ctx.set_color(rgb(match self.sudoku.cell_status((self.x, self.y)) {
+                    crate::sudoku::SolveStatus::Unsolved => 0x000000,
+                    crate::sudoku::SolveStatus::Solved => 0x00ff00,
+                    crate::sudoku::SolveStatus::Invalid => 0xff0000,
+                }));
 
                 let digit = u8::from(digit).to_string();
                 let text_extents = ctx.text_extents(&digit);
@@ -132,7 +155,7 @@ impl Drawable for Cell {
                 ctx.move_to(x_pos, y_pos);
                 ctx.show_text(&digit);
             }
-            Cell::Pencil(pencil) => {
+            CellContents::Pencil(pencil) => {
                 assert!(
                     pencil.len() <= 9,
                     "Too many pencil marks, something went super wrong"
