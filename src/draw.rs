@@ -2,7 +2,7 @@ use cairo::{Context, Matrix, Rectangle};
 
 use crate::{
     color::{get_digit_color, rgb, rgba, SetColor},
-    sudoku::{CellContents, Sudoku},
+    sudoku::{Cell, CellValue, Sudoku},
 };
 
 pub trait Drawable {
@@ -36,7 +36,7 @@ impl Drawable for Sudoku {
             let x = i % 3;
             let y = i / 3;
 
-            Block { sudoku: self, x, y }.draw(
+            DrawingBlock { sudoku: self, x, y }.draw(
                 ctx,
                 Rectangle {
                     x: x as f64 / 3.0 + (border_width * x as f64) / 2.0,
@@ -49,12 +49,12 @@ impl Drawable for Sudoku {
     }
 }
 
-struct Block<'s> {
+struct DrawingBlock<'s> {
     sudoku: &'s Sudoku,
     x: usize,
     y: usize,
 }
-impl<'s> Drawable for Block<'s> {
+impl<'s> Drawable for DrawingBlock<'s> {
     fn draw_impl(&self, ctx: &Context) {
         let border_width = 0.01;
 
@@ -65,8 +65,8 @@ impl<'s> Drawable for Block<'s> {
             let global_x = x + self.x * 3;
             let global_y = y + self.y * 3;
 
-            Cell {
-                contents: &self.sudoku[(global_x, global_y)],
+            DrawingCell {
+                contents: self.sudoku.get((global_x, global_y)),
                 sudoku: self.sudoku,
                 x: global_x,
                 y: global_y,
@@ -99,25 +99,25 @@ impl<'s> Drawable for Block<'s> {
 }
 
 #[derive(Debug, Clone)]
-struct Cell<'s> {
+struct DrawingCell<'s> {
     sudoku: &'s Sudoku,
-    contents: &'s CellContents,
+    contents: CellValue<'s>,
     x: usize,
     y: usize,
 }
-impl Drawable for Cell<'_> {
+impl Drawable for DrawingCell<'_> {
     fn draw_impl(&self, ctx: &Context) {
         ctx.set_color(rgba(0x80808080));
         ctx.rectangle(0.0, 0.0, 1.0, 1.0);
         ctx.fill();
 
-        match self.contents {
-            CellContents::Given(digit) => {
-                let digit = *digit;
-
-                ctx.set_color(get_digit_color(digit));
-                ctx.rectangle(0.0, 0.0, 1.0, 1.0);
-                ctx.fill();
+        match &self.contents {
+            CellValue::Known(Cell { value: digit, is_given }) => {
+                if *is_given {
+                    ctx.set_color(get_digit_color(*digit));
+                    ctx.rectangle(0.0, 0.0, 1.0, 1.0);
+                    ctx.fill();
+                }
 
                 ctx.set_font_size(0.8);
                 ctx.set_color(rgb(match self.sudoku.cell_status((self.x, self.y)) {
@@ -126,7 +126,7 @@ impl Drawable for Cell<'_> {
                     crate::sudoku::SolveStatus::Invalid => 0xff0000,
                 }));
 
-                let digit = u8::from(digit).to_string();
+                let digit = u8::from(*digit).to_string();
                 let text_extents = ctx.text_extents(&digit);
 
                 let x_pos = 0.5 - text_extents.width / 2.0 - text_extents.x_bearing;
@@ -135,36 +135,16 @@ impl Drawable for Cell<'_> {
                 ctx.move_to(x_pos, y_pos);
                 ctx.show_text(&digit);
             }
-            CellContents::Digit(digit) => {
-                let digit = *digit;
-
-                ctx.set_font_size(0.8);
-
-                ctx.set_color(rgb(match self.sudoku.cell_status((self.x, self.y)) {
-                    crate::sudoku::SolveStatus::Unsolved => 0x000000,
-                    crate::sudoku::SolveStatus::Solved => 0x00ff00,
-                    crate::sudoku::SolveStatus::Invalid => 0xff0000,
-                }));
-
-                let digit = u8::from(digit).to_string();
-                let text_extents = ctx.text_extents(&digit);
-
-                let x_pos = 0.5 - text_extents.width / 2.0 - text_extents.x_bearing;
-                let y_pos = 0.5 - text_extents.height / 2.0 - text_extents.y_bearing;
-
-                ctx.move_to(x_pos, y_pos);
-                ctx.show_text(&digit);
-            }
-            CellContents::Pencil(pencil) => {
+            CellValue::Unknown(options) => {
                 assert!(
-                    pencil.len() <= 9,
-                    "Too many pencil marks, something went super wrong"
+                    options.len() <= 9,
+                    "Too many options marks, something went super wrong"
                 );
 
                 ctx.set_font_size(0.3);
                 ctx.set_color(rgb(0x808080));
 
-                for (i, pencil_mark) in pencil.iter().copied().enumerate() {
+                for (i, pencil_mark) in options.iter().copied().enumerate() {
                     let y_offset = (i / 3) as f64 * (1.0 / 3.0);
                     let x_offset = (i % 3) as f64 * (1.0 / 3.0);
 

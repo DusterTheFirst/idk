@@ -1,13 +1,10 @@
+use petgraph::{graph::NodeIndex, visit::EdgeRef, Graph, Undirected};
 use std::{
     collections::{BTreeSet, HashSet},
     convert::{TryFrom, TryInto},
     fmt::Debug,
-    ops::{Index, IndexMut},
     str::FromStr,
 };
-
-use derive_more::{AsRef, Deref, DerefMut};
-use petgraph::{graph::NodeIndex, visit::EdgeRef, Graph, Undirected};
 use thiserror::Error;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -24,8 +21,20 @@ pub enum SolveStatus {
     Invalid,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Cell {
+    pub value: Digit,
+    pub is_given: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum CellValue<'a> {
+    Known(&'a Cell),
+    Unknown(BTreeSet<Digit>),
+}
+
 #[derive(Debug)]
-pub struct Sudoku(Graph<CellContents, Relation, Undirected>);
+pub struct Sudoku(Graph<Option<Cell>, Relation, Undirected>);
 
 impl Sudoku {
     pub fn new() -> Self {
@@ -34,11 +43,7 @@ impl Sudoku {
 
         for x in 0..9 {
             for y in 0..9 {
-                all_cells.push((
-                    (x, y),
-                    x / 3 + (y / 3) * 3,
-                    graph.add_node(CellContents::Pencil(BTreeSet::new())),
-                ))
+                all_cells.push(((x, y), x / 3 + (y / 3) * 3, graph.add_node(None)))
             }
         }
 
@@ -59,23 +64,23 @@ impl Sudoku {
         Sudoku(graph)
     }
 
-    pub fn solved(&self) -> bool {
-        // TODO: Check rows and columns
-        // self.iter().all(|x| x.valid())
-        false
-    }
+    // pub fn solved(&self) -> bool {
+    //     // TODO: Check rows and columns
+    //     // self.iter().all(|x| x.valid())
+    //     false
+    // }
 
     pub fn block_status(&self, (block_x, block_y): (usize, usize)) -> SolveStatus {
         let mut digits = HashSet::new();
 
         for cell in self.neighbors((block_x * 3, block_y * 3), Relation::Block) {
             match cell {
-                CellContents::Digit(digit) | CellContents::Given(digit) => {
-                    if !digits.insert(digit) {
+                Some(Cell { value, .. }) => {
+                    if !digits.insert(value) {
                         return SolveStatus::Invalid;
                     }
                 }
-                CellContents::Pencil(_) => {
+                None => {
                     return SolveStatus::Unsolved;
                 }
             }
@@ -85,28 +90,28 @@ impl Sudoku {
     }
 
     pub fn cell_status(&self, (x, y): (usize, usize)) -> SolveStatus {
-        let cell_digit = match &self[(x, y)] {
-            CellContents::Digit(digit) | CellContents::Given(digit) => digit,
-            CellContents::Pencil(_) => {
+        let cell_digit = match self.get_raw((x, y)) {
+            Some(Cell { value, .. }) => value,
+            None => {
                 return SolveStatus::Unsolved;
             }
         };
 
-        let mut has_pencil = false;
+        let mut has_empty = false;
         for cell in self.all_neighbors((x, y)) {
             match cell {
-                CellContents::Digit(digit) | CellContents::Given(digit) => {
-                    if cell_digit == digit {
+                Some(Cell { value, .. }) => {
+                    if &cell_digit == value {
                         return SolveStatus::Invalid;
                     }
                 }
-                CellContents::Pencil(_) => {
-                    has_pencil = true;
+                None => {
+                    has_empty = true;
                 }
             }
         }
 
-        if has_pencil {
+        if has_empty {
             SolveStatus::Unsolved
         } else {
             SolveStatus::Solved
@@ -117,14 +122,14 @@ impl Sudoku {
         &self,
         (x, y): (usize, usize),
         relation: Relation,
-    ) -> impl Iterator<Item = &CellContents> {
+    ) -> impl Iterator<Item = &Option<Cell>> {
         self.0
             .edges(Self::index_of((x, y)))
             .filter(move |x| x.weight() == &relation)
             .map(move |x| &self.0[x.target()])
     }
 
-    pub fn all_neighbors(&self, (x, y): (usize, usize)) -> impl Iterator<Item = &CellContents> {
+    pub fn all_neighbors(&self, (x, y): (usize, usize)) -> impl Iterator<Item = &Option<Cell>> {
         self.0
             .edges(Self::index_of((x, y)))
             .map(move |x| &self.0[x.target()])
@@ -133,19 +138,62 @@ impl Sudoku {
     fn index_of((x, y): (usize, usize)) -> NodeIndex {
         NodeIndex::new(x * 9 + y)
     }
-}
 
-impl Index<(usize, usize)> for Sudoku {
-    type Output = CellContents;
-
-    fn index(&self, pos: (usize, usize)) -> &Self::Output {
-        &self.0[Self::index_of(pos)]
+    pub fn all_raw(&self) -> impl Iterator<Item = ((usize, usize), &Option<Cell>)> {
+        (0..9)
+            .map(|x| (0..9).map(move |y| (x, y)))
+            .flatten()
+            .map(move |coords| (coords, &self.0[Self::index_of(coords)]))
     }
-}
 
-impl IndexMut<(usize, usize)> for Sudoku {
-    fn index_mut(&mut self, pos: (usize, usize)) -> &mut Self::Output {
-        &mut self.0[Self::index_of(pos)]
+    pub fn all(&self) -> impl Iterator<Item = ((usize, usize), CellValue)> {
+        self.all_raw().map(move |(pos, c)| {
+            (
+                pos,
+                match c {
+                    Some(c) => CellValue::Known(c),
+                    None => CellValue::Unknown(self.possibilities(pos)),
+                },
+            )
+        })
+    }
+
+    pub fn get_raw(&self, (x, y): (usize, usize)) -> Option<Cell> {
+        self.0[Self::index_of((x, y))]
+    }
+
+    pub(self) fn set_given(&mut self, (x, y): (usize, usize), value: Digit) {
+        self.0[Self::index_of((x, y))] = Some(Cell {
+            is_given: true,
+            value,
+        });
+    }
+
+    pub fn set(&mut self, (x, y): (usize, usize), value: Option<Digit>) {
+        self.0[Self::index_of((x, y))] = value.map(|value| Cell {
+            is_given: false,
+            value,
+        });
+    }
+
+    pub fn get(&self, (x, y): (usize, usize)) -> CellValue {
+        let idx = Self::index_of((x, y));
+        match &self.0[idx] {
+            Some(c) => CellValue::Known(c),
+            None => CellValue::Unknown(self.possibilities((x, y))),
+        }
+    }
+
+    pub fn possibilities(&self, (x, y): (usize, usize)) -> BTreeSet<Digit> {
+        let mut digits: BTreeSet<_> = Digit::iterator().collect();
+
+        for neighbor in self.all_neighbors((x, y)) {
+            if let Some(digit) = neighbor {
+                digits.remove(&digit.value);
+            }
+        }
+
+        digits
     }
 }
 
@@ -155,6 +203,8 @@ pub enum SudokuParseError {
     TooShort(usize),
     #[error("encountered an invalid character: {0}")]
     InvalidChar(char),
+    #[error("the board provided is invalid at ({0}, {1})")]
+    InvalidSudoku(usize, usize),
 }
 
 impl FromStr for Sudoku {
@@ -177,14 +227,23 @@ impl FromStr for Sudoku {
                 let char = s.chars().nth(x + y * 9).unwrap();
 
                 if char != '-' {
-                    sudoku[(x, y)] = CellContents::Given(
+                    sudoku.set_given(
+                        (x, y),
                         (char
                             .to_digit(10)
                             .ok_or(SudokuParseError::InvalidChar(char))?
                             as u8)
                             .try_into()
                             .map_err(|_| SudokuParseError::InvalidChar(char))?,
-                    )
+                    );
+                }
+            }
+        }
+
+        for x in 0..9 {
+            for y in 0..9 {
+                if sudoku.cell_status((x, y)) == SolveStatus::Invalid {
+                    return Err(SudokuParseError::InvalidSudoku(x, y));
                 }
             }
         }
@@ -193,13 +252,6 @@ impl FromStr for Sudoku {
 
         Ok(sudoku)
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum CellContents {
-    Digit(Digit),
-    Given(Digit),
-    Pencil(BTreeSet<Digit>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -1,17 +1,17 @@
-use std::{env::args, fs, rc::Rc, sync::RwLock};
+use std::{collections::{BTreeSet, HashSet}, env::args, fs, sync::{Arc, RwLock}, thread, time::Duration};
 
 use cairo::Rectangle;
 use draw::Drawable;
 use gio::prelude::*;
 use glib::clone;
 use gtk::{prelude::*, Align, AspectFrame, Box, Button, ButtonBox, DrawingArea, Orientation};
-use sudoku::{CellContents, Digit, Relation, Sudoku};
+use sudoku::{CellValue, Sudoku};
 
 mod color;
 mod draw;
 mod sudoku;
 
-fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
+fn build_ui(application: &gtk::Application, sudoku: Arc<RwLock<Sudoku>>) {
     let window = gtk::ApplicationWindow::new(application);
     let box_container = Box::new(Orientation::Vertical, 5);
 
@@ -54,44 +54,85 @@ fn build_ui(application: &gtk::Application, sudoku: Rc<RwLock<Sudoku>>) {
     }));
     drawing_area.set_size_request(500, 500);
 
+    let (tx, rx) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
+
     start_button.connect_button_press_event(
-        clone!(@strong sudoku, @strong drawing_area => move |_, _| {
-            let mut sudoku = sudoku.write().unwrap();
+        clone!(@strong sudoku => move |_, _| {
+            thread::spawn(clone!(@strong sudoku, @strong tx => move || {
+                let mut moves = Vec::new();
 
+                'outer: loop {
+                    thread::sleep(Duration::from_millis(50));
 
-            // Add all pencils
-            for x in 0..9 {
-                for y in 0..9 {
-                    if let CellContents::Pencil(set) = &mut sudoku[(x, y)] {
-                        for digit in Digit::iterator() {
-                            set.insert(digit);
-                        }
-                    }
-                }
-            }
+                    let mut sudoku_lock = sudoku.write().unwrap();
 
-            drawing_area.queue_draw();
+                    let smallest = sudoku_lock.all().filter_map(|(pos, cell)| if let CellValue::Unknown(options) = cell {
+                        Some((pos, options))
+                    } else {
+                        None
+                    }).min_by_key(|(_, marks)| marks.len()).map(|(pos, marks)| (pos, marks.iter().next().copied()));
 
-            // Filter pencils
-            for x in 0..9 {
-                for y in 0..9 {
-                    if let CellContents::Pencil(set) = &sudoku[(x, y)] {
-                        let mut set = set.clone();
+                    if let Some((pos, mark)) = smallest {
+                        if let Some(digit) = mark {
+                            moves.push((pos, {
+                                let mut set = BTreeSet::new();
+                                set.insert(digit);
+                                set
+                            }));
+                            sudoku_lock.set(pos, Some(digit));
+                        } else {
+                            eprintln!("Invalid board, ran into 0 pencil marks at {:?}", pos);
+                            eprintln!("Backtracking from {:?}", moves.last());
 
-                        for neighbor in sudoku.all_neighbors((x, y)) {
-                            if let CellContents::Given(digit) = neighbor {
-                                set.remove(&digit);
+                            drop(sudoku_lock); // Clear other lock
+                            loop {
+                                thread::sleep(Duration::from_millis(50));
+                                let mut sudoku_lock = sudoku.write().unwrap();
+
+                                if let Some((back_move, mut back_digits)) = moves.pop() {
+                                    let possibilities = sudoku_lock.possibilities(back_move);
+
+                                    if let Some(other_possibility) = possibilities.difference(&back_digits).next().map(|x| *x) {
+                                        sudoku_lock.set(back_move, Some(other_possibility));
+
+                                        back_digits.insert(other_possibility);
+                                        moves.push((back_move, back_digits));
+                                        break;
+                                    } else {
+                                        sudoku_lock.set(back_move, None);
+                                    }
+                                } else {
+                                    eprintln!("Backtracked to the start");
+                                    
+                                    break 'outer;
+                                }
+
+                                tx.send(()).expect("Could not poll refresh");
                             }
                         }
+                    } else {
+                        eprintln!("Solved?");
 
-                        sudoku[(x, y)] = CellContents::Pencil(set);
+                        break;
                     }
-                }
-            }
 
-            drawing_area.queue_draw();
+                    tx.send(()).expect("Could not poll refresh");
+                }
+                
+                tx.send(()).expect("Could not poll refresh");
+            }));
+
 
             Inhibit(false)
+        }),
+    );
+
+    rx.attach(
+        None,
+        clone!(@strong drawing_area => move |_: ()| {
+            drawing_area.queue_draw();
+
+            glib::Continue(true)
         }),
     );
 
@@ -121,12 +162,12 @@ fn main() {
         .expect("Initialization failed...");
 
     let sudoku = fs::read_to_string(args().nth(1).unwrap_or_else(|| "sudoku.txt".into())).unwrap();
-    let sudoku = Rc::new(RwLock::new(
+    let sudoku = Arc::new(RwLock::new(
         sudoku.parse().unwrap_or_else(|e| panic!("{}", e)),
     ));
 
     application.connect_activate(move |app| {
-        build_ui(app, Rc::clone(&sudoku));
+        build_ui(app, Arc::clone(&sudoku));
     });
 
     application.run(&[]);
