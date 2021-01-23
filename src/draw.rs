@@ -112,7 +112,10 @@ impl Drawable for DrawingCell<'_> {
         ctx.fill();
 
         match &self.contents {
-            CellValue::Known(Cell { value: digit, is_given }) => {
+            CellValue::Known(Cell {
+                value: digit,
+                is_given,
+            }) => {
                 if *is_given {
                     ctx.set_color(get_digit_color(*digit));
                     ctx.rectangle(0.0, 0.0, 1.0, 1.0);

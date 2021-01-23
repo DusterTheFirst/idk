@@ -118,6 +118,7 @@ impl Sudoku {
         }
     }
 
+    // TODO: Row, column and cell display
     pub fn neighbors(
         &self,
         (x, y): (usize, usize),
@@ -247,8 +248,6 @@ impl FromStr for Sudoku {
                 }
             }
         }
-
-        // TODO: VALIDATE
 
         Ok(sudoku)
     }
